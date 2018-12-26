@@ -80,11 +80,71 @@ struct IdxData
 {
 	std::vector<uint8_t> bytes;
 	std::vector<int> dims;
+
+	bool load(const char* pFilename)
+	{
+		FILE* fp = fopen(pFilename, "rb");
+		if( !fp)
+		{
+			std::cout << "failed to open " << pFilename << std::endl;
+			return false;
+		}
+
+		uint8_t magic[4];
+		fread(magic, 4, 1,fp);
+
+		if (magic[0] == 0 && magic[1] == 0 )
+		{
+			size_t size = 1;
+			if( eFormat fmt  = getFormat(magic[2], size) )
+			{
+				int dim = magic[3];
+				print_Format(fmt, dim, size);	
+
+				size_t s = 1;
+				for(int i= 0;i<dim; ++i)
+				{
+					// read size.
+					int32_t dimSize = 0;
+					fread(&dimSize,1,4,fp);
+
+					// byteswap
+					dimSize = SwapBytes(dimSize);
+
+					// debug.
+					std::cout << "\t" << i << "=" << dimSize << std::endl;
+
+					// record size.
+					dims.push_back(dimSize);
+				}
+				for(int i : dims )
+				{
+					s*= i;	
+				}
+				std::cout << "reading " << (s/(1024*1024)) << " mb" << std::endl;
+				bytes.resize(s);
+				fread(bytes.data(), s, 1, fp);
+
+				return true;
+
+				/*
+				for( int i = 0; i < 60000; ++i )
+				{
+					size_t offset = i*dims[1]*dims[2];
+					drawImage(d.bytes.data()+offset, d.dims[1], d.dims[2]);			
+				}*/
+			}
+		}
+		return false;
+
+	}
+
 };
 
 void drawImage(uint8_t* data, int xlen, int ylen)
 {
-	const char* vals = " .,oO0*&$";
+	const char* vals = " .:-=+*#%@";
+	
 	for(int y=0; y<ylen; ++y)
 	{
 		for(int x=0; x<xlen; ++x)
@@ -97,67 +157,27 @@ void drawImage(uint8_t* data, int xlen, int ylen)
 	std::cout << std::endl;
 }
 
+IdxData gLabels;
+IdxData gImgs;
+
 int main(int argc, char** argv)
 {
-	if( argc < 2 )
+	if( argc < 3 )
 	{
-		std::cout << "please supply a IDX3 filename as argument" << std::endl;
+		std::cout << "usage: training_images.idx training_lables.idx " << std::endl;
 		return -1;
 	}
 
-	FILE* fp = fopen(argv[1], "rb");
-	if( !fp)
+	gImgs.load(argv[1]);
+	gLabels.load(argv[2]);
+
+	for( int i = 0; i < gImgs.dims[0]; ++i )
 	{
-		std::cout << "failed to open " << argv[1] << std::endl;
-		return -1;
+		size_t offset = i*gImgs.dims[1]*gImgs.dims[2];
+		drawImage(gImgs.bytes.data()+offset, gImgs.dims[1], gImgs.dims[2]);			
+		int labl = gLabels.bytes[i];
+		std::cout << labl << std::endl;
 	}
 
-	uint8_t magic[4];
-	fread(magic, 4, 1,fp);
-	
-	std::vector<IdxData> data;
-	if (magic[0] == 0 && magic[1] == 0 )
-	{
-		size_t size = 1;
-		if( eFormat fmt  = getFormat(magic[2], size) )
-		{
-			int dim = magic[3];
-			print_Format(fmt, dim, size);	
-			
-			IdxData d;
-			size_t s = 1;
-
-			for(int i= 0;i<dim; ++i)
-			{
-				// read size.
-				int32_t dimSize = 0;
-				fread(&dimSize,1,4,fp);
-			
-				// byteswap
-				dimSize = SwapBytes(dimSize);
-
-				// debug.
-				std::cout << "\t" << i << "=" << dimSize << std::endl;
-
-				// record size.
-				d.dims.push_back(dimSize);
-			}
-			for(int i : d.dims )
-			{
-				s*= i;	
-			}
-			std::cout << "reading " << (s/(1024*1024)) << " mb" << std::endl;
-			d.bytes.resize(s);
-			fread(d.bytes.data(), s, 1, fp);
-
-			for( int i = 0; i < 60000; ++i )
-			{
-				size_t offset = i*d.dims[1]*d.dims[2];
-				drawImage(d.bytes.data()+offset, d.dims[1], d.dims[2]);			
-			}
-		}
-	}
-
-	fclose(fp);
 	return 0;
 }
