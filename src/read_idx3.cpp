@@ -2,6 +2,9 @@
 #include <fstream>
 #include <stdio.h>
 #include <vector>
+#include <stdlib.h>
+#include <cmath>
+
 
 enum eFormat
 {
@@ -126,13 +129,6 @@ struct IdxData
 				fread(bytes.data(), s, 1, fp);
 
 				return true;
-
-				/*
-				for( int i = 0; i < 60000; ++i )
-				{
-					size_t offset = i*dims[1]*dims[2];
-					drawImage(d.bytes.data()+offset, d.dims[1], d.dims[2]);			
-				}*/
 			}
 		}
 		return false;
@@ -160,6 +156,117 @@ void drawImage(uint8_t* data, int xlen, int ylen)
 IdxData gLabels;
 IdxData gImgs;
 
+struct Layer
+{
+	std::vector<float> v; 			// vals;
+	std::vector<std::vector<float>> w; 	// weights.
+	std::vector<float> b; 			// bias.
+
+	static float randNorm() // value between -1...1
+	{
+		static int kMax = 65535;
+		int r = rand() % kMax;
+		float fr = (float)r / kMax;
+		return fr;
+	}
+
+	static float calcPass(std::vector<float>& inputs, std::vector<float>& weights, float bias)
+	{
+		// apply weights.
+		float val = 0;
+		for(int i = 0; i < inputs.size(); ++i)
+		{
+			val += weights[i] * inputs[i];
+		}
+
+		// add bias.
+		val += bias;
+
+		// activation funciton.
+		val = sigmoid(val);
+
+		return val;
+	}
+
+	void init(int nVals, int nInputs)
+	{
+		v.resize(nVals);
+		w.resize(nVals);
+		b.resize(nVals);
+
+		// foreach neuron. 
+		for(int n = 0; n < v.size(); n++)
+		{
+			// for each input.
+			b[n] = randNorm();
+			std::vector<float>& weights = w[n];
+			weights.resize(nInputs);
+			for(int i = 0; i < nInputs; ++i)
+			{
+				weights[i] = randNorm();
+			}
+		}
+
+	}
+
+	static float sigmoid(float x)
+	{
+		return x / (1.f + fabs(x));
+	}
+
+	void doForwardPass(std::vector<float>& in)
+	{
+		// Each neuron has a weight for each input
+		for(int n = 0; n < v.size(); n++)
+		{
+			v[n] = calcPass(in,w[n],b[n]);
+		}
+	}
+
+	void calcLoss(std::vector<float>& expected, std::vector<float>& deltaSqrd)
+	{
+		deltaSqrd.resize(expected.size());
+		for(int i = 0; i < expected.size(); ++i)
+		{
+			float d = v[i]-expected[i];
+			deltaSqrd[i] = d*d;	
+		}
+	}	
+
+	Layer(int nNodes, int nInputs ) { init(nNodes,nInputs); }	
+};
+
+struct NN
+{
+	// input layer.
+	std::vector<float> input;
+
+	std::vector<Layer> hidden;
+
+	// output layer
+	Layer output;
+
+	void doForwardPass()
+	{
+		hidden[0].doForwardPass(input);
+		hidden[1].doForwardPass(hidden[0].v);	
+		output.doForwardPass(hidden[1].v);	
+	}
+	void calcLoss(std::vector<float>& expected, std::vector<float>& loss)
+	{
+		output.calcLoss(expected,loss);
+	}
+
+	NN(int nInputs, int nHidden, int nOutputs)
+		: output(16, nOutputs)
+	{
+		input.resize(nInputs);
+		hidden.resize(nHidden, Layer(16, nInputs)) ;
+	}
+};
+
+NN gNN(28*28, 2, 10);
+
 int main(int argc, char** argv)
 {
 	if( argc < 3 )
@@ -177,7 +284,52 @@ int main(int argc, char** argv)
 		drawImage(gImgs.bytes.data()+offset, gImgs.dims[1], gImgs.dims[2]);			
 		int labl = gLabels.bytes[i];
 		std::cout << labl << std::endl;
+
+		// light up correct output.
+		std::vector<float> expected;
+		expected.resize(10,0.f);
+		expected[labl] = 1.f;
+
+		// send input to NN.
+		uint8_t* pSrc = gImgs.bytes.data()+offset;
+		float* pDst = gNN.input.data();
+		for(int y = 0; y < gImgs.dims[1]; ++y)
+		{
+			for(int x = 0; x < gImgs.dims[2]; x++)
+			{
+				*pDst = ((float)*pSrc/255.f); // put intput into 0..1 range.
+				pDst++;
+				pSrc++;
+			}
+		}
+
+		gNN.doForwardPass();
+		std::vector<float> loss;
+		loss.resize(10);
+		gNN.calcLoss(expected,loss);
+
+		std::cout << "error={";
+		for( float i : loss)
+			std::cout << i << ",";
+		std::cout << "}" << std::endl;
+		
+		std::cout << "output={";
+		for( float i : gNN.output.v)
+			std::cout << i << ",";
+		std::cout << "}" << std::endl;
+
+		// Debug.
+		//break;
 	}
+	/*
+	for( int i = 0; i < gImgs.dims[0]; ++i )
+	{
+		size_t offset = i*gImgs.dims[1]*gImgs.dims[2];
+		drawImage(gImgs.bytes.data()+offset, gImgs.dims[1], gImgs.dims[2]);			
+		int labl = gLabels.bytes[i];
+		std::cout << labl << std::endl;
+	}
+	*/
 
 	return 0;
 }
